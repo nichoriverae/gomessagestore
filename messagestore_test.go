@@ -2,6 +2,7 @@ package gomessagestore_test
 
 import (
 	"context"
+	"io/ioutil"
 	"reflect"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	. "github.com/blackhatbrigade/gomessagestore"
 	"github.com/blackhatbrigade/gomessagestore/repository/mocks"
 	"github.com/golang/mock/gomock"
+	"github.com/sirupsen/logrus"
 )
 
 func TestNewMessageStore(t *testing.T) {
@@ -17,7 +19,9 @@ func TestNewMessageStore(t *testing.T) {
 
 	mockDB, _, _ := sqlmock.New()
 
-	msgStore := NewMessageStore(mockDB)
+	var logrusLogger = logrus.New()
+	logrusLogger.Out = ioutil.Discard
+	msgStore := NewMessageStore(mockDB, logrusLogger)
 
 	if msgStore == nil {
 		t.Error("Failed to create message store")
@@ -30,7 +34,9 @@ func TestNewMessageStoreFromRepository(t *testing.T) {
 
 	mockRepo := mock_repository.NewMockRepository(ctrl)
 
-	msgStore := NewMessageStoreFromRepository(mockRepo)
+	var logrusLogger = logrus.New()
+	logrusLogger.Out = ioutil.Discard
+	msgStore := NewMessageStoreFromRepository(mockRepo, logrusLogger)
 
 	if msgStore == nil {
 		t.Error("Failed to create message store from repository")
@@ -41,9 +47,11 @@ func TestMessageStoreCanCreateAProjector(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
+	var logrusLogger = logrus.New()
+	logrusLogger.Out = ioutil.Discard
 	mockRepo := mock_repository.NewMockRepository(ctrl)
 
-	msgStore := NewMessageStoreFromRepository(mockRepo)
+	msgStore := NewMessageStoreFromRepository(mockRepo, logrusLogger)
 
 	msgStore.CreateProjector()
 }

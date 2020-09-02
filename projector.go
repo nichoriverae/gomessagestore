@@ -41,7 +41,8 @@ type ProjectorOption func(proj *projector)
 // Projector A base level interface that defines the projection functionality of gomessagestore.
 type Projector interface {
 	Run(ctx context.Context, category string, entityID uuid.UUID) (interface{}, error)
-	Step(msg Message, previousState interface{}) (interface{}, bool)
+	RunOnStream(ctx context.Context, stream string) (interface{}, error)
+	Step(msg Message, previousState interface{}) (interface{}, bool, error)
 }
 
 // projector The base projector struct.
@@ -51,9 +52,19 @@ type projector struct {
 	defaultState interface{}
 }
 
-// Run calls getMessages on the projector and runs each messagae through a matching reducer to derive the state, and returns the state after all messages are processed
+// RunOnStream retrieves all messages for a given stream, and runs the projector on each message found
+func (proj *projector) RunOnStream(ctx context.Context, stream string) (interface{}, error) {
+	return proj.run(ctx, stream)
+}
+
+// Run retrieves all messages for a given category and entity, and runs the projector on each message found
 func (proj *projector) Run(ctx context.Context, category string, entityID uuid.UUID) (interface{}, error) {
-	msgs, err := proj.getMessages(ctx, category, entityID)
+	return proj.run(ctx, category+"-"+entityID.String())
+}
+
+// run calls getMessages, for a given category and id, on the projector and runs each message through a matching reducer to derive the state, and returns the state after all messages are processed
+func (proj *projector) run(ctx context.Context, stream string) (interface{}, error) {
+	msgs, err := proj.getMessages(ctx, stream)
 
 	if err != nil {
 		return nil, err
@@ -61,7 +72,9 @@ func (proj *projector) Run(ctx context.Context, category string, entityID uuid.U
 
 	state := proj.defaultState
 	for _, message := range msgs {
-		if newState, ok := proj.Step(message, state); ok {
+		if newState, ok, err := proj.Step(message, state); err != nil {
+			return nil, err
+		} else if ok {
 			state = newState
 		}
 	}
@@ -70,13 +83,17 @@ func (proj *projector) Run(ctx context.Context, category string, entityID uuid.U
 }
 
 // Step is ran for each message, iterating the state for the reducer mapped to that message
-func (proj *projector) Step(msg Message, previousState interface{}) (interface{}, bool) {
+func (proj *projector) Step(msg Message, previousState interface{}) (interface{}, bool, error) {
 	for _, reducer := range proj.reducers {
 		if reducer.Type() == msg.Type() {
-			return reducer.Reduce(msg, previousState), true
+			if reduction, err := reducer.Reduce(msg, previousState); err == nil {
+				return reduction, true, nil
+			} else {
+				return nil, false, err
+			}
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 //WithReducer registers a ruducer with the new projector
@@ -102,10 +119,10 @@ func DefaultState(defaultState interface{}) ProjectorOption {
 }
 
 // getMessages retrieves messages from the message store
-func (proj *projector) getMessages(ctx context.Context, category string, entityID uuid.UUID) ([]Message, error) {
+func (proj *projector) getMessages(ctx context.Context, stream string) ([]Message, error) {
 	batchsize := 1000
 	msgs, err := proj.ms.Get(ctx,
-		EventStream(category, entityID),
+		GenericStream(stream),
 		BatchSize(batchsize),
 	)
 	if err != nil {
@@ -117,7 +134,7 @@ func (proj *projector) getMessages(ctx context.Context, category string, entityI
 		allMsgs = append(allMsgs, msgs...)
 		for len(msgs) == batchsize {
 			msgs, err = proj.ms.Get(ctx,
-				EventStream(category, entityID),
+				GenericStream(stream),
 				BatchSize(batchsize),
 				SinceVersion(msgs[batchsize-1].Version()+1), // Since grabs an inclusive list, so grab 1 after the latest version
 			)

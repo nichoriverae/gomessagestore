@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"reflect"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	mock_repository "github.com/blackhatbrigade/gomessagestore/repository/mocks"
 	"github.com/blackhatbrigade/gomessagestore/uuid"
 	"github.com/golang/mock/gomock"
+	"github.com/sirupsen/logrus"
 )
 
 func TestSetPosition(t *testing.T) {
@@ -66,9 +68,12 @@ func TestSetPosition(t *testing.T) {
 				WriteMessage(ctx, &envelopeMatcher{test.positionEnvelope}).
 				Return(test.expectedError)
 
-			myMessageStore := NewMessageStoreFromRepository(mockRepo)
+			var logrusLogger = logrus.New()
+			logrusLogger.Out = ioutil.Discard
+			myMessageStore := NewMessageStoreFromRepository(mockRepo, logrusLogger)
 
-			opts, err := GetSubscriberConfig(test.opts...)
+			defaultOptions := []SubscriberOption{SubscribeLogger(logrusLogger)}
+			opts, err := GetSubscriberConfig(append(defaultOptions, test.opts...)...)
 			panicIf(err)
 
 			myWorker, err := CreateWorker(

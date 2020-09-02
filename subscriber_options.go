@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/blackhatbrigade/gomessagestore/uuid"
+	"github.com/sirupsen/logrus"
 )
 
 //SubscriberOption allows for various options when creating a subscriber
@@ -20,6 +21,8 @@ type SubscriberConfig struct {
 	updateInterval  int           //
 	batchSize       int           // the maximum amount of messages to be retrieved at a time
 	position        int64         // the position from which to retrieve messages
+	log             logrus.FieldLogger
+	converters      []MessageConverter // convert non-command/event messages
 	errorFunc       func(error)
 }
 
@@ -51,6 +54,20 @@ func SubscribeToCommandStream(category string) SubscriberOption {
 			sub.commandCategory = category
 			sub.stream = true
 		}
+		return nil
+	}
+}
+
+//SubscribeToCommandCategory subscribes to a category of streams and ensures that it is not also subscribed to a stream
+func SubscribeToCommandCategory(category string) SubscriberOption {
+	return func(sub *SubscriberConfig) error {
+		if sub.stream {
+			return ErrSubscriberCannotUseBothStreamAndCategory
+		}
+		if sub.category != "" {
+			return ErrSubscriberCannotSubscribeToMultipleCategories
+		}
+		sub.category = category + ":command"
 		return nil
 	}
 }
@@ -111,6 +128,7 @@ func GetSubscriberConfig(opts ...SubscriberOption) (*SubscriberConfig, error) {
 		pollErrorDelay: 5 * time.Second,
 		updateInterval: 100,
 	}
+
 	for _, option := range opts {
 		if option == nil {
 			return nil, ErrSubscriberNilOption
@@ -132,14 +150,33 @@ func GetSubscriberConfig(opts ...SubscriberOption) (*SubscriberConfig, error) {
 	if config.updateInterval < 2 {
 		return nil, ErrInvalidMsgInterval
 	}
+	if config.log == nil {
+		config.log = logrus.New()
+	}
 
 	return config, nil
+}
+
+// SubscribeLogger allows to configure the logger used inside the Subscriber
+func SubscribeLogger(logger logrus.FieldLogger) SubscriberOption {
+	return func(sub *SubscriberConfig) error {
+		sub.log = logger
+		return nil
+	}
 }
 
 // OnError when the subscriber reaches an error, it will call this func instead of panicking
 func OnError(errorFunc func(error)) SubscriberOption {
 	return func(sub *SubscriberConfig) error {
 		sub.errorFunc = errorFunc
+		return nil
+	}
+}
+
+//WithConverter allows for automatic converting of non-Command/Event type messages
+func WithConverter(converter MessageConverter) SubscriberOption {
+	return func(sub *SubscriberConfig) error {
+		sub.converters = append(sub.converters, converter)
 		return nil
 	}
 }

@@ -2,11 +2,13 @@ package gomessagestore_test
 
 import (
 	"context"
+	"io/ioutil"
 	"testing"
 
 	. "github.com/blackhatbrigade/gomessagestore"
 	"github.com/blackhatbrigade/gomessagestore/repository/mocks"
 	"github.com/golang/mock/gomock"
+	"github.com/sirupsen/logrus"
 )
 
 func TestWriteMessage(t *testing.T) {
@@ -18,14 +20,16 @@ func TestWriteMessage(t *testing.T) {
 	msg := getSampleCommand()
 	ctx := context.Background()
 
-	msgEnv := getSampleCommandAsEnvelope()
+	msgEnv := getSampleCommandAsEnvelopeEntityIDMissing()
 
 	mockRepo.
 		EXPECT().
 		WriteMessage(ctx, msgEnv)
 
-	msgStore := NewMessageStoreFromRepository(mockRepo)
-	msgStore.Write(ctx, msg)
+	var logrusLogger = logrus.New()
+	logrusLogger.Out = ioutil.Discard
+	myMessageStore := NewMessageStoreFromRepository(mockRepo, logrusLogger)
+	myMessageStore.Write(ctx, msg)
 }
 
 func TestWriteWithAtPosition(t *testing.T) {
@@ -37,7 +41,7 @@ func TestWriteWithAtPosition(t *testing.T) {
 	msg := getSampleCommand()
 	ctx := context.Background()
 
-	msgEnv := getSampleCommandAsEnvelope()
+	msgEnv := getSampleCommandAsEnvelopeEntityIDMissing()
 	var expectedPosition int64
 
 	expectedPosition = 42
@@ -46,8 +50,10 @@ func TestWriteWithAtPosition(t *testing.T) {
 		EXPECT().
 		WriteMessageWithExpectedPosition(ctx, msgEnv, expectedPosition)
 
-	msgStore := NewMessageStoreFromRepository(mockRepo)
-	msgStore.Write(ctx, msg, AtPosition(42))
+	var logrusLogger = logrus.New()
+	logrusLogger.Out = ioutil.Discard
+	myMessageStore := NewMessageStoreFromRepository(mockRepo, logrusLogger)
+	myMessageStore.Write(ctx, msg, AtPosition(42))
 }
 
 func TestAtPositionMatcher(t *testing.T) {

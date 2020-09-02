@@ -2,12 +2,14 @@ package gomessagestore_test
 
 import (
 	"context"
+	"io/ioutil"
 	"reflect"
 	"testing"
 
 	. "github.com/blackhatbrigade/gomessagestore"
 	mock_repository "github.com/blackhatbrigade/gomessagestore/repository/mocks"
 	"github.com/golang/mock/gomock"
+	"github.com/sirupsen/logrus"
 )
 
 func TestSubscriberProcessesMessages(t *testing.T) {
@@ -96,9 +98,12 @@ func TestSubscriberProcessesMessages(t *testing.T) {
 			ctx := context.Background()
 			mockRepo := mock_repository.NewMockRepository(ctrl)
 
-			myMessageStore := NewMessageStoreFromRepository(mockRepo)
+			var logrusLogger = logrus.New()
+			logrusLogger.Out = ioutil.Discard
+			myMessageStore := NewMessageStoreFromRepository(mockRepo, logrusLogger)
 
-			opts, err := GetSubscriberConfig(test.opts...)
+			defaultOptions := []SubscriberOption{SubscribeLogger(logrusLogger)}
+			opts, err := GetSubscriberConfig(append(defaultOptions, test.opts...)...)
 			panicIf(err)
 
 			myWorker, err := CreateWorker(

@@ -3,6 +3,7 @@ package gomessagestore_test
 import (
 	"context"
 	"errors"
+	"io/ioutil"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/blackhatbrigade/gomessagestore/repository"
 	mock_repository "github.com/blackhatbrigade/gomessagestore/repository/mocks"
 	"github.com/golang/mock/gomock"
+	"github.com/sirupsen/logrus"
 )
 
 func TestCreateSubscriber(t *testing.T) {
@@ -58,7 +60,9 @@ func TestCreateSubscriber(t *testing.T) {
 
 			mockRepo := mock_repository.NewMockRepository(ctrl)
 
-			myMessageStore := NewMessageStoreFromRepository(mockRepo)
+			var logrusLogger = logrus.New()
+			logrusLogger.Out = ioutil.Discard
+			myMessageStore := NewMessageStoreFromRepository(mockRepo, logrusLogger)
 
 			_, err := myMessageStore.CreateSubscriber(
 				test.subscriberID,
@@ -89,6 +93,13 @@ func TestCreateSubscriberOptions(t *testing.T) {
 		opts: []SubscriberOption{
 			SubscribeToEntityStream("some stream", uuid1),
 			SubscribeToCategory("some category"),
+		},
+	}, {
+		name:          "both category and stream cannot be set for commands",
+		expectedError: ErrSubscriberCannotUseBothStreamAndCategory,
+		opts: []SubscriberOption{
+			SubscribeToCommandStream("some stream"),
+			SubscribeToCommandCategory("some category"),
 		},
 	}, {
 		name: "Subscribe to command stream does not return error",
@@ -127,11 +138,25 @@ func TestCreateSubscriberOptions(t *testing.T) {
 			SubscribeToEntityStream("some category", uuid1),
 		},
 	}, {
+		name:          "Subscribe should only accept one category subscription request, (entity and entity)",
+		expectedError: ErrSubscriberCannotSubscribeToMultipleCategories,
+		opts: []SubscriberOption{
+			SubscribeToCategory("some entity category"),
+			SubscribeToCategory("some entity category"),
+		},
+	}, {
 		name:          "Subscribe should only accept one category subscription request, (command and entity)",
 		expectedError: ErrSubscriberCannotSubscribeToMultipleCategories,
 		opts: []SubscriberOption{
-			SubscribeToCategory("some category"),
-			SubscribeToCategory("some category"),
+			SubscribeToCommandCategory("some command category"),
+			SubscribeToCategory("some entity category"),
+		},
+	}, {
+		name:          "Subscribe should only accept one category subscription request, (command and command)",
+		expectedError: ErrSubscriberCannotSubscribeToMultipleCategories,
+		opts: []SubscriberOption{
+			SubscribeToCommandCategory("some command category"),
+			SubscribeToCommandCategory("some command category"),
 		},
 	}, {
 		name:          "Cannot set 0 poll time",
@@ -188,6 +213,15 @@ func TestCreateSubscriberOptions(t *testing.T) {
 			SubscribeBatchSize(-1),
 			SubscribeToCategory("some category"),
 		},
+	}, {
+		name: "Logger doesn't Error",
+		opts: []SubscriberOption{
+			SubscribeLogger(logrus.WithFields(logrus.Fields{
+				"subscriberID": "someSubcriberId123",
+			}),
+			),
+			SubscribeToCategory("some category"),
+		},
 	}}
 
 	for _, test := range tests {
@@ -197,7 +231,9 @@ func TestCreateSubscriberOptions(t *testing.T) {
 
 			mockRepo := mock_repository.NewMockRepository(ctrl)
 
-			myMessageStore := NewMessageStoreFromRepository(mockRepo)
+			var logrusLogger = logrus.New()
+			logrusLogger.Out = ioutil.Discard
+			myMessageStore := NewMessageStoreFromRepository(mockRepo, logrusLogger)
 
 			_, err := myMessageStore.CreateSubscriber(
 				"someid",
@@ -240,7 +276,9 @@ func TestOnError(t *testing.T) {
 	}
 
 	mockRepo := mock_repository.NewMockRepository(ctrl)
-	myMessageStore := NewMessageStoreFromRepository(mockRepo)
+	logger := logrus.New()
+	logger.Out = ioutil.Discard
+	myMessageStore := NewMessageStoreFromRepository(mockRepo, logger)
 	subscriber, err := myMessageStore.CreateSubscriber(
 		"someid",
 		[]MessageHandler{messageHandler},
@@ -294,10 +332,10 @@ func (mh *msgHandler) Process(ctx context.Context, msg Message) error {
 		return mh.retErr
 	}
 	switch msg.(type) {
-	case *Event:
+	case Event:
 		mh.class = msg.Type()
 		mh.handled = append(mh.handled, mh.class)
-	case *Command:
+	case Command:
 		mh.class = msg.Type()
 		mh.handled = append(mh.handled, mh.class)
 	default:

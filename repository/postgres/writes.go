@@ -1,31 +1,33 @@
-package repository
+package postgres
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/blackhatbrigade/gomessagestore/repository"
 	"github.com/blackhatbrigade/gomessagestore/uuid"
 	"github.com/sirupsen/logrus"
 )
 
-func (r postgresRepo) WriteMessage(ctx context.Context, msg *MessageEnvelope) error {
+func (r postgresRepo) WriteMessage(ctx context.Context, msg *repository.MessageEnvelope) error {
 	return r.writeMessageEitherWay(ctx, msg)
 }
 
-func (r postgresRepo) WriteMessageWithExpectedPosition(ctx context.Context, msg *MessageEnvelope, position int64) error {
+func (r postgresRepo) WriteMessageWithExpectedPosition(ctx context.Context, msg *repository.MessageEnvelope, position int64) error {
 	return r.writeMessageEitherWay(ctx, msg, position)
 }
 
-func (r postgresRepo) writeMessageEitherWay(ctx context.Context, msg *MessageEnvelope, position ...int64) error {
+func (r postgresRepo) writeMessageEitherWay(ctx context.Context, msg *repository.MessageEnvelope, position ...int64) error {
 	if msg == nil {
-		return ErrNilMessage
+		return repository.ErrNilMessage
 	}
 
 	if msg.ID == uuid.Nil {
-		return ErrMessageNoID
+		return repository.ErrMessageNoID
 	}
 
 	if msg.StreamName == "" {
-		return ErrInvalidStreamName
+		return repository.ErrInvalidStreamName
 	}
 
 	// our return channel for our goroutine that will either finish or be cancelled
@@ -46,12 +48,21 @@ func (r postgresRepo) writeMessageEitherWay(ctx context.Context, msg *MessageEnv
 		)"*/
 		if len(position) > 0 {
 			if position[0] < -1 {
-				retChan <- ErrInvalidPosition
+				retChan <- repository.ErrInvalidPosition
 				return
 			}
 
 			// with _expected_version passed in
 			query := "SELECT write_message($1, $2, $3, $4, $5, $6)"
+			logrus.WithFields(logrus.Fields{
+				"query":              query,
+				"ID":                 msg.ID,
+				"StreamName":         msg.StreamName,
+				"MessageMessageType": msg.MessageType,
+				"Data":               string(msg.Data),
+				"MessageMetadata":    string(msg.Metadata),
+				"ExpectedVersion":    fmt.Sprintf("%d", position[0]),
+			}).Debug("about to write message")
 			if _, err := r.dbx.ExecContext(ctx, query, msg.ID, msg.StreamName, msg.MessageType, msg.Data, msg.Metadata, position[0]); err != nil {
 				logrus.WithError(err).Error("Failure in repo_postgres.go::WriteMessageWithExpectedPosition")
 				retChan <- err
@@ -65,8 +76,8 @@ func (r postgresRepo) writeMessageEitherWay(ctx context.Context, msg *MessageEnv
 				"ID":                 msg.ID,
 				"StreamName":         msg.StreamName,
 				"MessageMessageType": msg.MessageType,
-				"Data":               msg.Data,
-				"MessageMetadata":    msg.Metadata,
+				"Data":               string(msg.Data),
+				"MessageMetadata":    string(msg.Metadata),
 			}).Debug("about to write message")
 			if _, err := r.dbx.ExecContext(ctx, query, msg.ID, msg.StreamName, msg.MessageType, msg.Data, msg.Metadata); err != nil {
 				logrus.WithError(err).Error("Failure in repo_postgres.go::WriteMessage")
@@ -74,6 +85,8 @@ func (r postgresRepo) writeMessageEitherWay(ctx context.Context, msg *MessageEnv
 				return
 			}
 		}
+
+		logrus.Debugf("wrote successfully to stream %s", msg.StreamName)
 	}()
 
 	// wait for our return channel or the context to cancel

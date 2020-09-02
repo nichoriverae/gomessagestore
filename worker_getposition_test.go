@@ -2,6 +2,7 @@ package gomessagestore_test
 
 import (
 	"context"
+	"io/ioutil"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	mock_repository "github.com/blackhatbrigade/gomessagestore/repository/mocks"
 	"github.com/blackhatbrigade/gomessagestore/uuid"
 	"github.com/golang/mock/gomock"
+	"github.com/sirupsen/logrus"
 )
 
 func TestSubscriberGetsPosition(t *testing.T) {
@@ -107,9 +109,12 @@ func TestSubscriberGetsPosition(t *testing.T) {
 				GetLastMessageInStream(ctx, "some id+position").
 				Return(test.positionEnvelope, nil)
 
-			myMessageStore := NewMessageStoreFromRepository(mockRepo)
+			var logrusLogger = logrus.New()
+			logrusLogger.Out = ioutil.Discard
+			myMessageStore := NewMessageStoreFromRepository(mockRepo, logrusLogger)
 
-			opts, err := GetSubscriberConfig(test.opts...)
+			defaultOptions := []SubscriberOption{SubscribeLogger(logrusLogger)}
+			opts, err := GetSubscriberConfig(append(defaultOptions, test.opts...)...)
 			panicIf(err)
 
 			myWorker, err := CreateWorker(
